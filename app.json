@@ -1,0 +1,43 @@
+{
+  "name": "todo-ledger",
+  "version": "0.1.0",
+  "displayName": "Todo Ledger",
+  "description": "Shared markdown todo lists. Humans and agent sessions create ledgers, claim items, and complete them — one source of truth across all sessions.",
+  "author": "qihang-dai",
+  "tags": ["todo", "tasks", "collaboration", "agents"],
+  "highlights": [
+    "Markdown-native: every ledger is a plain .md file with GFM checkboxes",
+    "Safe concurrency: CAS version guard on edits, atomic per-item claim for agents",
+    "Many sessions, one list: agents claim unclaimed items server-side, no double work"
+  ],
+  "skills": ["skills/todo-ledger"],
+  "agents": ["agents/ledger-worker.json"],
+  "crons": [
+    {
+      "name": "pickup",
+      "every": 900,
+      "enabled": false,
+      "message": "Follow the SOP at skills/todo-ledger/sops/pickup.md: use the todo-ledger CLI to claim up to 3 unclaimed items, do the work for each, then transition them. If claim returns no items, produce NO output and stop."
+    }
+  ],
+  "ui": {
+    "entry": "dist/index.mjs",
+    "pages": [
+      {
+        "route": "/apps/todo-ledger",
+        "label": "Ledgers",
+        "icon": "NotebookPen"
+      }
+    ]
+  },
+  "backend": {
+    "hooks": {
+      "routes": "backend.routes:register"
+    }
+  },
+  "permissions": {
+    "api": ["/api/apps/todo-ledger"],
+    "storage": true,
+    "events": ["update"]
+  }
+}

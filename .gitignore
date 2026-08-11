@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+ui/node_modules/
+# ui/dist tracked: local install serves ui.entry=dist/index.mjs as-is
+.DS_Store
