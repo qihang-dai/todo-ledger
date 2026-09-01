@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { CLAIM_RE } from './api'
 
 /**
@@ -118,6 +118,47 @@ function parse(content: string): { pre: string[]; sections: TSection[] } {
   return { pre, sections }
 }
 
+// -- theme detection ---------------------------------------------------------------
+//
+// The host theme is a runtime toggle (not necessarily OS-linked), and status
+// colors need different palettes per theme — pale ambers/blues that glow on
+// dark are unreadable on white. Detect by resolving the actual background
+// luminance and re-check when the host mutates the root element's class/style.
+
+function bgIsLight(): boolean {
+  try {
+    let el: Element | null = document.body
+    while (el) {
+      const c = getComputedStyle(el).backgroundColor
+      const m = /rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+))?\)/.exec(c)
+      if (m && (m[4] === undefined || parseFloat(m[4]) > 0.1)) {
+        const [r, g, b] = [+m[1], +m[2], +m[3]]
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b > 128
+      }
+      el = el.parentElement
+    }
+  } catch {
+    /* SSR / detached — fall through to dark */
+  }
+  return false
+}
+
+function useLightTheme(): boolean {
+  const [light, setLight] = useState(bgIsLight)
+  useEffect(() => {
+    const recheck = () => setLight(bgIsLight())
+    recheck()
+    const obs = new MutationObserver(recheck)
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'style', 'data-theme'],
+    })
+    obs.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] })
+    return () => obs.disconnect()
+  }, [])
+  return light
+}
+
 // -- inline linkifier: URLs, bare CR ids, bare ticket ids -------------------------
 //
 // CRs are the currency of workstreams — every CR mentioned in an item belongs
@@ -232,62 +273,86 @@ function ExtraBlock({ label, lines }: { label: string; lines: string[] }) {
 }
 
 const TLT_CSS = `
-.tlt { font-size: 13px; line-height: 1.5; }
+.tlt {
+  font-size: 13px; line-height: 1.5;
+  --t-amber: #f0a020; --t-amber-tx: #ffd27d; --t-amber-pill-tx: #14100a;
+  --t-blue: #58a6ff;  --t-blue-tx: #a5cfff;
+  --t-purple: #bc8cff; --t-purple-tx: #c9a8ff;
+  --t-red: #f85149;   --t-red-tx: #ff9d97;
+  --t-green: #3fb950;
+  --t-glow: 0 0 10px rgba(240,160,32,.4);
+  --t-line: var(--border, rgba(128,128,128,.25));
+  --t-dim: var(--muted, #8b949e);
+}
+.tlt.tlt-light {
+  --t-amber: #b45309; --t-amber-tx: #92400e; --t-amber-pill-tx: #fff;
+  --t-blue: #0969da;  --t-blue-tx: #0a4f9e;
+  --t-purple: #6f42c1; --t-purple-tx: #5e35a8;
+  --t-red: #cf222e;   --t-red-tx: #a40e26;
+  --t-green: #1a7f37;
+  --t-glow: none;
+  --t-line: var(--border, rgba(0,0,0,.14));
+  --t-dim: var(--muted, #57606a);
+}
 .tlt a { color: var(--accent, #7c9cff); text-decoration: underline; text-underline-offset: 2px; }
 .tlt-stats { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 14px; }
 .tlt-st { padding: 3px 10px; border-radius: 6px; font-size: 11.5px; font-weight: 600; border: 1px solid; }
-.tlt-st-open { color: #f0a020; border-color: rgba(240,160,32,.4); background: rgba(240,160,32,.08); }
-.tlt-st-prog { color: #58a6ff; border-color: rgba(88,166,255,.4); background: rgba(88,166,255,.08); }
-.tlt-st-gate { color: #bc8cff; border-color: rgba(188,140,255,.4); background: rgba(188,140,255,.08); }
-.tlt-st-blk  { color: #f85149; border-color: rgba(248,81,73,.4);  background: rgba(248,81,73,.08); }
-.tlt-st-done { color: var(--muted, #8b949e); border-color: var(--border, rgba(128,128,128,.3)); }
-.tlt-sec { margin: 0 0 6px; border-left: 2px solid var(--border, rgba(128,128,128,.25)); }
+.tlt-st-open { color: var(--t-amber); border-color: color-mix(in srgb, var(--t-amber) 45%, transparent); background: color-mix(in srgb, var(--t-amber) 9%, transparent); }
+.tlt-st-prog { color: var(--t-blue); border-color: color-mix(in srgb, var(--t-blue) 45%, transparent); background: color-mix(in srgb, var(--t-blue) 9%, transparent); }
+.tlt-st-gate { color: var(--t-purple); border-color: color-mix(in srgb, var(--t-purple) 45%, transparent); background: color-mix(in srgb, var(--t-purple) 9%, transparent); }
+.tlt-st-blk  { color: var(--t-red); border-color: color-mix(in srgb, var(--t-red) 45%, transparent); background: color-mix(in srgb, var(--t-red) 9%, transparent); }
+.tlt-st-done { color: var(--t-dim); border-color: var(--t-line); }
+.tlt-sec { margin: 0 0 6px; border-left: 2px solid var(--t-line); }
 .tlt-sec > summary { cursor: pointer; list-style: none; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 10px; border-radius: 0 8px 8px 0; user-select: none; }
 .tlt-sec > summary::-webkit-details-marker { display: none; }
 .tlt-sec > summary::before { content: '▸'; opacity: .5; font-size: 10px; transition: transform .15s; }
 .tlt-sec[open] > summary::before { transform: rotate(90deg); }
-.tlt-hot { border-left-color: #f0a020; }
-.tlt-hot > summary { background: linear-gradient(90deg, rgba(240,160,32,.06), transparent 60%); }
+.tlt-hot { border-left-color: var(--t-amber); }
+.tlt-hot > summary { background: linear-gradient(90deg, color-mix(in srgb, var(--t-amber) 7%, transparent), transparent 60%); }
 .tlt-title { font-weight: 700; font-size: 12.5px; }
 .tlt-cold { opacity: .75; }
-.tlt-cold .tlt-title { font-weight: 500; color: var(--muted, #8b949e); }
+.tlt-cold .tlt-title { font-weight: 500; color: var(--t-dim); }
 .tlt-pill { font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 99px; }
-.tlt-pill-open { background: #f0a020; color: #14100a; box-shadow: 0 0 10px rgba(240,160,32,.4); }
-.tlt-pill-prog { color: #58a6ff; border: 1px solid rgba(88,166,255,.35); }
-.tlt-pill-gate { color: #bc8cff; border: 1px solid rgba(188,140,255,.35); }
-.tlt-pill-blk  { color: #f85149; border: 1px solid rgba(248,81,73,.35); }
-.tlt-pill-done { color: var(--muted, #8b949e); border: 1px solid var(--border, rgba(128,128,128,.3)); }
+.tlt-pill-open { background: var(--t-amber); color: var(--t-amber-pill-tx); box-shadow: var(--t-glow); }
+.tlt-pill-prog { color: var(--t-blue); border: 1px solid color-mix(in srgb, var(--t-blue) 40%, transparent); }
+.tlt-pill-gate { color: var(--t-purple); border: 1px solid color-mix(in srgb, var(--t-purple) 40%, transparent); }
+.tlt-pill-blk  { color: var(--t-red); border: 1px solid color-mix(in srgb, var(--t-red) 40%, transparent); }
+.tlt-pill-done { color: var(--t-dim); border: 1px solid var(--t-line); }
 .tlt-its { list-style: none; margin: 2px 0 8px; padding: 0 0 0 24px; position: relative; }
-.tlt-its::before { content: ''; position: absolute; left: 12px; top: 0; bottom: 8px; width: 1px; background: var(--border, rgba(128,128,128,.25)); }
+.tlt-its::before { content: ''; position: absolute; left: 12px; top: 0; bottom: 8px; width: 1px; background: var(--t-line); }
 .tlt-it { position: relative; padding: 3px 8px 3px 4px; margin: 2px 0; border-radius: 6px; display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
-.tlt-it::before { content: ''; position: absolute; left: -12px; top: 50%; width: 10px; height: 1px; background: var(--border, rgba(128,128,128,.25)); }
+.tlt-it::before { content: ''; position: absolute; left: -12px; top: 50%; width: 10px; height: 1px; background: var(--t-line); }
 .tlt-tx { flex: 1 1 auto; min-width: 0; }
 .tlt-ic { font-size: 11px; flex: none; }
 .tlt-ic-inline { font-size: 11px; }
-.tlt-check { width: 13px; height: 13px; flex: none; align-self: center; cursor: pointer; accent-color: #f0a020; }
-.tlt-open { background: rgba(240,160,32,.07); border: 1px solid rgba(240,160,32,.22); }
-.tlt-open .tlt-tx { color: #ffd27d; font-weight: 600; }
-.tlt-gate { background: rgba(188,140,255,.05); border: 1px solid rgba(188,140,255,.16); }
-.tlt-gate .tlt-tx { color: #c9a8ff; }
-.tlt-gate .tlt-check { accent-color: #bc8cff; }
-.tlt-prog { background: rgba(88,166,255,.05); border: 1px solid rgba(88,166,255,.16); }
-.tlt-prog .tlt-ic { color: #58a6ff; }
-.tlt-prog .tlt-tx { color: #a5cfff; }
-.tlt-blk { background: rgba(248,81,73,.05); border: 1px solid rgba(248,81,73,.16); }
-.tlt-blk .tlt-ic { color: #f85149; }
-.tlt-blk .tlt-tx { color: #ff9d97; }
-.tlt-done { opacity: .45; font-size: 12px; }
-.tlt-done .tlt-check { accent-color: #3fb950; }
+.tlt-check { width: 13px; height: 13px; flex: none; align-self: center; cursor: pointer; accent-color: var(--t-amber); }
+.tlt-open { background: color-mix(in srgb, var(--t-amber) 8%, transparent); border: 1px solid color-mix(in srgb, var(--t-amber) 25%, transparent); }
+.tlt-open .tlt-tx { color: var(--t-amber-tx); font-weight: 600; }
+.tlt-gate { background: color-mix(in srgb, var(--t-purple) 6%, transparent); border: 1px solid color-mix(in srgb, var(--t-purple) 20%, transparent); }
+.tlt-gate .tlt-tx { color: var(--t-purple-tx); }
+.tlt-gate .tlt-check { accent-color: var(--t-purple); }
+.tlt-prog { background: color-mix(in srgb, var(--t-blue) 6%, transparent); border: 1px solid color-mix(in srgb, var(--t-blue) 20%, transparent); }
+.tlt-prog .tlt-ic { color: var(--t-blue); }
+.tlt-prog .tlt-tx { color: var(--t-blue-tx); }
+.tlt-blk { background: color-mix(in srgb, var(--t-red) 6%, transparent); border: 1px solid color-mix(in srgb, var(--t-red) 20%, transparent); }
+.tlt-blk .tlt-ic { color: var(--t-red); }
+.tlt-blk .tlt-tx { color: var(--t-red-tx); }
+.tlt-done { opacity: .55; font-size: 12px; }
+.tlt-done .tlt-check { accent-color: var(--t-green); }
 .tlt-busy { opacity: .5; }
-.tlt-claim { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 0 5px; border: 1px solid var(--border, rgba(128,128,128,.3)); border-radius: 4px; font-size: 10.5px; opacity: .7; }
+.tlt-claim { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 0 5px; border: 1px solid var(--t-line); border-radius: 4px; font-size: 10.5px; opacity: .7; }
 .tlt-notes { flex: 1 0 100%; margin-left: 20px; }
 .tlt-notes > summary { cursor: pointer; list-style: none; font-size: 10.5px; opacity: .55; user-select: none; }
 .tlt-notes > summary::-webkit-details-marker { display: none; }
-.tlt-notes-body { margin: 3px 0 4px; padding: 6px 8px; border-left: 2px solid var(--border, rgba(128,128,128,.25)); font-size: 11.5px; opacity: .8; overflow-wrap: anywhere; }
+.tlt-notes-body { margin: 3px 0 4px; padding: 6px 8px; border-left: 2px solid var(--t-line); font-size: 11.5px; opacity: .8; overflow-wrap: anywhere; }
+.tlt-donefold { margin: 0 0 8px 24px; }
+.tlt-donefold > summary { cursor: pointer; list-style: none; font-size: 11px; color: var(--t-dim); user-select: none; padding: 2px 0; }
+.tlt-donefold > summary::-webkit-details-marker { display: none; }
+.tlt-donefold .tlt-its { margin-top: 0; }
 .tlt-extra { margin: 2px 0 8px 24px; }
 .tlt-extra > summary { cursor: pointer; list-style: none; font-size: 10.5px; opacity: .55; user-select: none; }
 .tlt-extra > summary::-webkit-details-marker { display: none; }
-.tlt-extra pre { margin: 4px 0; padding: 8px 10px; border: 1px solid var(--border, rgba(128,128,128,.25)); border-radius: 6px; font-size: 11px; line-height: 1.45; overflow-x: auto; }
+.tlt-extra pre { margin: 4px 0; padding: 8px 10px; border: 1px solid var(--t-line); border-radius: 6px; font-size: 11px; line-height: 1.45; overflow-x: auto; }
 `
 
 export function TaskTree({
@@ -300,12 +365,13 @@ export function TaskTree({
   onToggle: (line0: number) => void
 }) {
   const { pre, sections } = useMemo(() => parse(content), [content])
+  const light = useLightTheme()
 
   const totals: Record<Status, number> = { open: 0, gate: 0, prog: 0, blk: 0, done: 0 }
   for (const s of sections) for (const it of s.items) totals[it.status]++
 
   return (
-    <div className="tlt">
+    <div className={`tlt${light ? ' tlt-light' : ''}`}>
       <style>{TLT_CSS}</style>
       <div className="tlt-stats">
         <span className="tlt-st tlt-st-open">● {totals.open} open — needs action</span>
@@ -316,11 +382,19 @@ export function TaskTree({
       </div>
       <ExtraBlock label="header notes" lines={pre} />
       {sections.map((s, i) => {
-        const pending = s.items.filter((it) => it.status !== 'done').length
-        const done = s.items.length - pending
-        const hot = pending > 0
+        const pendingRows = s.items.filter((it) => it.status !== 'done')
+        const doneRows = s.items.filter((it) => it.status === 'done')
+        const hot = pendingRows.length > 0
         const counts: Record<string, number> = {}
         for (const it of s.items) counts[it.status] = (counts[it.status] ?? 0) + 1
+        const doneList =
+          doneRows.length > 0 ? (
+            <ul className="tlt-its">
+              {doneRows.map((it) => (
+                <ItemRow key={it.line0} item={it} pendingLine={pendingLine} onToggle={onToggle} />
+              ))}
+            </ul>
+          ) : null
         return (
           <details key={i} className={`tlt-sec ${hot ? 'tlt-hot' : 'tlt-cold'}`} open={hot}>
             <summary>
@@ -332,18 +406,30 @@ export function TaskTree({
                   </span>
                 ) : null,
               )}
-              {done > 0 ? (
+              {doneRows.length > 0 ? (
                 <span className="tlt-pill tlt-pill-done">
-                  {hot ? `${done} done` : `✓ all ${done} done`}
+                  {hot ? `${doneRows.length} done` : `✓ all ${doneRows.length} done`}
                 </span>
               ) : null}
             </summary>
-            {s.items.length > 0 ? (
+            {pendingRows.length > 0 ? (
               <ul className="tlt-its">
-                {s.items.map((it) => (
+                {pendingRows.map((it) => (
                   <ItemRow key={it.line0} item={it} pendingLine={pendingLine} onToggle={onToggle} />
                 ))}
               </ul>
+            ) : null}
+            {/* Done rows: folded away inside active workstreams, plainly listed
+                inside all-done workstreams (the section itself is collapsed). */}
+            {doneRows.length > 0 ? (
+              hot ? (
+                <details className="tlt-donefold">
+                  <summary>✓ {doneRows.length} done — expand</summary>
+                  {doneList}
+                </details>
+              ) : (
+                doneList
+              )
             ) : null}
             <ExtraBlock label="section notes" lines={s.extra} />
           </details>
