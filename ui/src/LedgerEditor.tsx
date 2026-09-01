@@ -5,6 +5,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { API_BASE, errText, rawJson, relTime } from './api'
 import type { LedgerDetail } from './api'
 import { TaskMarkdown } from './Markdown'
+import { TaskTree } from './TreeView'
+
+const VIEW_KEY = 'todo-ledger:view'
+
+function initialView(): 'tree' | 'doc' {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'doc' ? 'doc' : 'tree'
+  } catch {
+    return 'tree'
+  }
+}
 
 /**
  * Editor view for one ledger. `detail` is the last-known SERVER state
@@ -20,6 +31,15 @@ export function LedgerEditor({ id, onBack }: { id: string; onBack: () => void })
   const [detail, setDetail] = useState<LedgerDetail | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [mode, setMode] = useState<'view' | 'edit'>('view')
+  const [view, setViewState] = useState<'tree' | 'doc'>(initialView)
+  const setView = (v: 'tree' | 'doc') => {
+    setViewState(v)
+    try {
+      localStorage.setItem(VIEW_KEY, v)
+    } catch {
+      /* persistence is best-effort */
+    }
+  }
   const [buffer, setBuffer] = useState('')
   const [dirty, setDirty] = useState(false)
   const [conflict, setConflict] = useState<{ content: string; version: number } | null>(null)
@@ -253,7 +273,12 @@ export function LedgerEditor({ id, onBack }: { id: string; onBack: () => void })
             </>
           ) : (
             <>
-              <Btn primary>View</Btn>
+              <Btn primary={view === 'tree'} onClick={() => setView('tree')}>
+                Tree
+              </Btn>
+              <Btn primary={view === 'doc'} onClick={() => setView('doc')}>
+                Doc
+              </Btn>
               <Btn onClick={enterEdit} disabled={!detail}>
                 Edit
               </Btn>
@@ -294,6 +319,8 @@ export function LedgerEditor({ id, onBack }: { id: string; onBack: () => void })
           <div className="max-w-3xl text-sm">
             {detail.content.trim() === '' ? (
               <p className="py-8 text-muted">Empty ledger — add an item below.</p>
+            ) : view === 'tree' ? (
+              <TaskTree content={detail.content} pendingLine={pendingLine} onToggle={toggle} />
             ) : (
               <TaskMarkdown content={detail.content} pendingLine={pendingLine} onToggle={toggle} />
             )}
