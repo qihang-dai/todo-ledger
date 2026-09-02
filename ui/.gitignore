@@ -1,2 +1,5 @@
 node_modules/
-dist/
+# dist/ is deliberately NOT ignored: app.json sets ui.entry to dist/index.mjs
+# and the host serves that path as-is, so the built bundle must be committed or
+# every fresh clone/install fails with "Failed to fetch dynamically imported
+# module". Matches the note in the repository-root .gitignore.
