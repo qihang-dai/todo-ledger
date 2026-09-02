@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { API_BASE, errText, rawJson, relTime } from './api'
 import type { LedgerDetail } from './api'
 import { TaskMarkdown } from './Markdown'
-import { TaskTree } from './TreeView'
+import { TaskTree, VERDICT_RE } from './TreeView'
 
 const VIEW_KEY = 'todo-ledger:view'
 
@@ -117,6 +117,93 @@ export function LedgerEditor({ id, onBack }: { id: string; onBack: () => void })
       notify(errText(e), { type: 'error' })
     } finally {
       setPendingLine(null)
+    }
+  }
+
+  /** Verdict: write `✅ VALID` / `❌ NOT-TRUE` as an indented note directly
+   * under the item. The item line stays byte-identical (claim markers safe);
+   * one verdict per item — a new one replaces any previous verdict note.
+   * Plain CAS content PUT; a 409 adopts server state, user retries. */
+  const verdict = async (line0: number, kind: 'valid' | 'disputed', note: string) => {
+    if (!detail || pendingLine !== null || holdRef.current) return
+    const lines = detail.content.split('\n')
+    const itemLine = lines[line0]
+    if (itemLine === undefined || !/^\s*- \[/.test(itemLine)) return
+    setPendingLine(line0)
+    try {
+      const indent = /^(\s*)/.exec(itemLine)![1]
+      // The item's note block: subsequent lines indented deeper than the item.
+      let end = line0 + 1
+      while (end < lines.length && lines[end].trim() && lines[end].startsWith(`${indent}  `)) end++
+      const keptNotes = lines.slice(line0 + 1, end).filter((l) => !VERDICT_RE.test(l.trim()))
+      const day = new Date().toISOString().slice(0, 10)
+      const tag = kind === 'valid' ? `✅ VALID (${day})` : `❌ NOT-TRUE (${day})`
+      const vline = `${indent}  - ${tag}${note ? `: ${note}` : ''}`
+      const next = [
+        ...lines.slice(0, line0 + 1),
+        vline,
+        ...keptNotes,
+        ...lines.slice(end),
+      ].join('\n')
+      const { status, data } = await rawJson('PUT', `${API_BASE}/ledgers/${id}`, {
+        base_version: detail.version,
+        content: next,
+      })
+      if (status === 409 && data && typeof data.content === 'string') {
+        setDetail((d) => (d ? { ...d, content: data.content, version: data.version } : d))
+        notify('List changed elsewhere — refreshed, try again', { type: 'info' })
+        return
+      }
+      if (status >= 400 || !data) {
+        notify(data?.error ? String(data.error) : `Verdict failed (HTTP ${status})`, {
+          type: 'error',
+        })
+        return
+      }
+      setDetail((d) => (d ? { ...d, ...data, content: next } : d))
+    } catch (e) {
+      notify(errText(e), { type: 'error' })
+    } finally {
+      setPendingLine(null)
+    }
+  }
+
+  /** Selection → new agent session: create a dashboard chat slot, send an
+   * investigation prompt carrying the selected text + ledger context, and
+   * open the chat in a new tab. The turn runs server-side on the slot, so it
+   * survives this tab regardless of the SSE consumer. */
+  const investigate = async (text: string) => {
+    if (!detail) return
+    try {
+      const snippet = text.length > 900 ? `${text.slice(0, 900)}…` : text
+      const created = await rawJson('POST', '/api/chat/slots', {
+        title: `Ledger: ${snippet.replace(/\s+/g, ' ').slice(0, 60)}`,
+      })
+      const key = created.data?.key
+      if (created.status >= 400 || typeof key !== 'string' || !key) {
+        notify(created.data?.error ? String(created.data.error) : 'Could not create session', {
+          type: 'error',
+        })
+        return
+      }
+      const message =
+        `Investigate this selected text from the todo-ledger "${detail.name}" (ledger id ${id}):\n\n` +
+        `${snippet}\n\n` +
+        `Get full ledger context with: python3 ~/.meshclaw/apps/todo-ledger/cli/ledger.py get ${id}\n` +
+        `Verify the claim(s) against real evidence (CRs, tickets, code, session history). Report findings. ` +
+        `If the ledger item needs a status change, apply it via the CLI with the exact-line guard; otherwise leave the ledger untouched.`
+      void fetch('/api/chat', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slot: key, message }),
+      }).catch(() => {
+        /* SSE consumer is best-effort; the turn runs on the slot server-side */
+      })
+      window.open(`/chat/investigate?sid=${encodeURIComponent(key)}`, '_blank', 'noopener')
+      notify('Investigation session started in a new tab', { type: 'info' })
+    } catch (e) {
+      notify(errText(e), { type: 'error' })
     }
   }
 
@@ -320,7 +407,13 @@ export function LedgerEditor({ id, onBack }: { id: string; onBack: () => void })
             {detail.content.trim() === '' ? (
               <p className="py-8 text-muted">Empty ledger — add an item below.</p>
             ) : view === 'tree' ? (
-              <TaskTree content={detail.content} pendingLine={pendingLine} onToggle={toggle} />
+              <TaskTree
+                content={detail.content}
+                pendingLine={pendingLine}
+                onToggle={toggle}
+                onVerdict={verdict}
+                onInvestigate={investigate}
+              />
             ) : (
               <TaskMarkdown content={detail.content} pendingLine={pendingLine} onToggle={toggle} />
             )}

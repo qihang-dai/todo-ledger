@@ -1,5 +1,27 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CLAIM_RE } from './api'
+
+/** Human verdict on an item, stored as an indented note line under it:
+ *  `  - ✅ VALID (YYYY-MM-DD)` or `  - ❌ NOT-TRUE (YYYY-MM-DD): reason`.
+ *  Living in the markdown keeps it visible in Doc view, greppable by agents,
+ *  and leaves the item line itself byte-identical (claim markers safe). */
+export const VERDICT_RE = /^-?\s*(✅ VALID|❌ NOT-TRUE)\s*\(([^)]*)\)\s*:?\s*(.*)$/
+
+interface Verdict {
+  kind: 'valid' | 'disputed'
+  meta: string
+  note: string
+}
+
+interface TItem {
+  line0: number
+  depth: number
+  status: Status
+  text: string
+  claim?: string
+  notes: string[]
+  verdict?: Verdict
+}
 
 /**
  * Tree view: the same ledger markdown rendered as a status-colored work tree.
@@ -27,15 +49,6 @@ import { CLAIM_RE } from './api'
  */
 
 type Status = 'open' | 'gate' | 'prog' | 'blk' | 'done'
-
-interface TItem {
-  line0: number
-  depth: number
-  status: Status
-  text: string
-  claim?: string
-  notes: string[]
-}
 
 interface TSection {
   title: string
@@ -99,7 +112,13 @@ function parse(content: string): { pre: string[]; sections: TSection[] } {
         continue
       }
       if (cur && /^\s{2,}/.test(raw)) {
-        cur.notes.push(raw.trim())
+        const t = raw.trim()
+        const v = VERDICT_RE.exec(t)
+        if (v) {
+          cur.verdict = { kind: v[1] === '✅ VALID' ? 'valid' : 'disputed', meta: v[2], note: v[3] }
+        } else {
+          cur.notes.push(t)
+        }
         continue
       }
       cur = null
@@ -211,16 +230,18 @@ function ItemRow({
   item,
   pendingLine,
   onToggle,
+  onVerdict,
 }: {
   item: TItem
   pendingLine: number | null
   onToggle: (line0: number) => void
+  onVerdict: (line0: number, kind: 'valid' | 'disputed', note: string) => void
 }) {
   const toggleable = item.status === 'open' || item.status === 'done' || item.status === 'gate'
   const busy = pendingLine !== null
   return (
     <li
-      className={`tlt-it tlt-${item.status}${pendingLine === item.line0 ? ' tlt-busy' : ''}`}
+      className={`tlt-it tlt-${item.status}${item.verdict?.kind === 'disputed' ? ' tlt-disputed' : ''}${pendingLine === item.line0 ? ' tlt-busy' : ''}`}
       style={item.depth ? { marginLeft: item.depth * 16 } : undefined}
     >
       {toggleable ? (
@@ -238,6 +259,38 @@ function ItemRow({
       <span className="tlt-tx">
         {item.status === 'gate' ? <span className="tlt-ic-inline">⛔ </span> : null}
         <Linked text={item.text} />
+      </span>
+      {item.verdict ? (
+        <span
+          className={`tlt-vchip tlt-vchip-${item.verdict.kind === 'valid' ? 'valid' : 'disp'}`}
+          title={`${item.verdict.kind === 'valid' ? 'Confirmed valid' : 'Marked NOT TRUE'} (${item.verdict.meta})${item.verdict.note ? `: ${item.verdict.note}` : ''}`}
+        >
+          {item.verdict.kind === 'valid' ? '✓ valid' : '✗ not true'}
+        </span>
+      ) : null}
+      <span className="tlt-acts">
+        <button
+          type="button"
+          className="tlt-abtn"
+          disabled={busy}
+          title="Confirm: this item is valid"
+          onClick={() => onVerdict(item.line0, 'valid', '')}
+        >
+          ✓
+        </button>
+        <button
+          type="button"
+          className="tlt-abtn"
+          disabled={busy}
+          title="Dispute: this item is not true"
+          onClick={() => {
+            const note = window.prompt('Why is this not true? (stored on the item)')
+            if (note === null) return
+            onVerdict(item.line0, 'disputed', note.trim())
+          }}
+        >
+          ✗
+        </button>
       </span>
       {item.claim ? (
         <span className="tlt-claim" title={`Claimed by ${item.claim}`}>
@@ -352,6 +405,17 @@ const TLT_CSS = `
 .tlt-extra { margin: 2px 0 8px 24px; }
 .tlt-extra > summary { cursor: pointer; list-style: none; font-size: 10.5px; opacity: .55; user-select: none; }
 .tlt-extra > summary::-webkit-details-marker { display: none; }
+.tlt { position: relative; }
+.tlt-acts { display: none; gap: 4px; flex: none; }
+.tlt-it:hover .tlt-acts { display: inline-flex; }
+.tlt-abtn { border: 1px solid var(--t-line); background: transparent; color: var(--t-dim); border-radius: 4px; font-size: 10px; line-height: 16px; padding: 0 5px; cursor: pointer; }
+.tlt-abtn:hover { color: inherit; border-color: var(--t-dim); }
+.tlt-abtn:disabled { opacity: .4; cursor: default; }
+.tlt-vchip { flex: none; font-size: 10px; font-weight: 700; padding: 0 6px; border-radius: 99px; }
+.tlt-vchip-valid { color: var(--t-green); border: 1px solid color-mix(in srgb, var(--t-green) 45%, transparent); }
+.tlt-vchip-disp { color: var(--t-red); border: 1px solid color-mix(in srgb, var(--t-red) 50%, transparent); background: color-mix(in srgb, var(--t-red) 10%, transparent); }
+.tlt-it.tlt-disputed { border-color: color-mix(in srgb, var(--t-red) 45%, transparent); background: color-mix(in srgb, var(--t-red) 5%, transparent); }
+.tlt-selbtn { position: absolute; z-index: 6; border: none; border-radius: 6px; background: var(--accent, #7c9cff); color: #fff; font-size: 11px; font-weight: 600; padding: 3px 9px; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
 .tlt-extra pre { margin: 4px 0; padding: 8px 10px; border: 1px solid var(--t-line); border-radius: 6px; font-size: 11px; line-height: 1.45; overflow-x: auto; }
 `
 
@@ -359,20 +423,63 @@ export function TaskTree({
   content,
   pendingLine,
   onToggle,
+  onVerdict,
+  onInvestigate,
 }: {
   content: string
   pendingLine: number | null
   onToggle: (line0: number) => void
+  onVerdict: (line0: number, kind: 'valid' | 'disputed', note: string) => void
+  onInvestigate: (text: string) => void
 }) {
   const { pre, sections } = useMemo(() => parse(content), [content])
   const light = useLightTheme()
+
+  // Text selection → floating "New session" affordance. Position is relative
+  // to the wrapper; cleared on outside click / empty selection.
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [sel, setSel] = useState<{ x: number; y: number; text: string } | null>(null)
+  const handleMouseUp = (e: React.MouseEvent) => {
+    const s = window.getSelection()
+    const text = s?.toString().trim() ?? ''
+    if (
+      text.length >= 3 &&
+      s &&
+      s.anchorNode &&
+      wrapRef.current &&
+      wrapRef.current.contains(s.anchorNode)
+    ) {
+      const rect = wrapRef.current.getBoundingClientRect()
+      setSel({ x: e.clientX - rect.left, y: e.clientY - rect.top + 16, text })
+    } else {
+      setSel(null)
+    }
+  }
 
   const totals: Record<Status, number> = { open: 0, gate: 0, prog: 0, blk: 0, done: 0 }
   for (const s of sections) for (const it of s.items) totals[it.status]++
 
   return (
-    <div className={`tlt${light ? ' tlt-light' : ''}`}>
+    <div
+      ref={wrapRef}
+      className={`tlt${light ? ' tlt-light' : ''}`}
+      onMouseUp={handleMouseUp}
+    >
       <style>{TLT_CSS}</style>
+      {sel ? (
+        <button
+          type="button"
+          className="tlt-selbtn"
+          style={{ left: Math.max(0, sel.x - 40), top: sel.y }}
+          onMouseDown={(e) => e.preventDefault() /* keep the selection */}
+          onClick={() => {
+            onInvestigate(sel.text)
+            setSel(null)
+          }}
+        >
+          ⚡ New session
+        </button>
+      ) : null}
       <div className="tlt-stats">
         <span className="tlt-st tlt-st-open">● {totals.open} open — needs action</span>
         <span className="tlt-st tlt-st-prog">◐ {totals.prog} in flight</span>
@@ -391,7 +498,7 @@ export function TaskTree({
           doneRows.length > 0 ? (
             <ul className="tlt-its">
               {doneRows.map((it) => (
-                <ItemRow key={it.line0} item={it} pendingLine={pendingLine} onToggle={onToggle} />
+                <ItemRow key={it.line0} item={it} pendingLine={pendingLine} onToggle={onToggle} onVerdict={onVerdict} />
               ))}
             </ul>
           ) : null
@@ -415,7 +522,7 @@ export function TaskTree({
             {pendingRows.length > 0 ? (
               <ul className="tlt-its">
                 {pendingRows.map((it) => (
-                  <ItemRow key={it.line0} item={it} pendingLine={pendingLine} onToggle={onToggle} />
+                  <ItemRow key={it.line0} item={it} pendingLine={pendingLine} onToggle={onToggle} onVerdict={onVerdict} />
                 ))}
               </ul>
             ) : null}
