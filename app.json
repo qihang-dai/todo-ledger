@@ -26,7 +26,8 @@
       {
         "route": "/apps/todo-ledger",
         "label": "Ledgers",
-        "icon": "NotebookPen"
+        "icon": "NotebookPen",
+        "iconUrl": "icon.svg"
       }
     ]
   },
