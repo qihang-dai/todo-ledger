@@ -128,12 +128,20 @@ function parse(content: string): { pre: string[]; sections: TSection[] } {
   }
 
   const preEnd = starts.length ? starts[0] : lines.length
-  const pre = parseRange(0, preEnd).extra
+  const head = parseRange(0, preEnd)
+  const pre = head.extra
   const sections: TSection[] = starts.map((s, idx) => {
     const end = idx + 1 < starts.length ? starts[idx + 1] : lines.length
     const { items, extra } = parseRange(s + 1, end)
     return { title: lines[s].slice(3).trim(), items, extra }
   })
+  // Items above the first `## ` heading (every item, in a ledger with no
+  // `## ` workstreams) would otherwise vanish from the tree. Show them as a
+  // leading section named after the `# ` title, or "Items" without one.
+  if (head.items.length) {
+    const h1 = lines.slice(0, preEnd).find((l) => l.startsWith('# '))
+    sections.unshift({ title: h1 ? h1.slice(2).trim() : 'Items', items: head.items, extra: [] })
+  }
   return { pre, sections }
 }
 
