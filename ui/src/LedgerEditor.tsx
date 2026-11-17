@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowLeft, Loader2, Plus } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { API_BASE, errText, rawJson, relTime } from './api'
 import type { LedgerDetail } from './api'
+import { useDialog } from './Dialog'
 import { TaskMarkdown } from './Markdown'
 import { TaskTree, VERDICT_RE } from './TreeView'
 
@@ -27,6 +28,7 @@ function initialView(): 'tree' | 'doc' {
 export function LedgerEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const api = useAppApi()
   const notify = useNotify()
+  const { dialog, confirm } = useDialog()
 
   const [detail, setDetail] = useState<LedgerDetail | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -308,8 +310,12 @@ export function LedgerEditor({ id, onBack }: { id: string; onBack: () => void })
     }
   }
 
-  const handleBack = () => {
-    if (holdRef.current && !window.confirm('Discard unsaved changes?')) return
+  const handleBack = async () => {
+    if (
+      holdRef.current &&
+      !(await confirm('Discard unsaved changes?', { confirmLabel: 'Discard', danger: true }))
+    )
+      return
     onBack()
   }
 
@@ -317,7 +323,7 @@ export function LedgerEditor({ id, onBack }: { id: string; onBack: () => void })
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Header: back + name (click to rename) + view/edit toggle */}
       <div className="flex items-center gap-3 px-6 pb-3 pt-5">
-        <Btn onClick={handleBack} title="Back to ledgers">
+        <Btn onClick={() => void handleBack()} title="Back to ledgers">
           <ArrowLeft size={14} />
         </Btn>
         {renaming ? (
@@ -454,6 +460,7 @@ export function LedgerEditor({ id, onBack }: { id: string; onBack: () => void })
           />
         </form>
       </div>
+      {dialog}
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CLAIM_RE } from './api'
+import { useDialog } from './Dialog'
 
 /** Human verdict on an item, stored as an indented note line under it:
  *  `  - ✅ VALID (YYYY-MM-DD)` or `  - ❌ NOT-TRUE (YYYY-MM-DD): reason`.
@@ -291,11 +292,7 @@ function ItemRow({
           className="tlt-abtn"
           disabled={busy}
           title="Dispute: this item is not true"
-          onClick={() => {
-            const note = window.prompt('Why is this not true? (stored on the item)')
-            if (note === null) return
-            onVerdict(item.line0, 'disputed', note.trim())
-          }}
+          onClick={() => onVerdict(item.line0, 'disputed', '')}
         >
           ✗
         </button>
@@ -442,6 +439,17 @@ export function TaskTree({
 }) {
   const { pre, sections } = useMemo(() => parse(content), [content])
   const light = useLightTheme()
+  const { dialog, prompt } = useDialog()
+
+  // A dispute asks for its reason first; cancelling the dialog drops it.
+  const verdict = async (line0: number, kind: 'valid' | 'disputed', note: string) => {
+    if (kind === 'disputed') {
+      const reason = await prompt('Why is this not true? (stored on the item)')
+      if (reason === null) return
+      note = reason.trim()
+    }
+    onVerdict(line0, kind, note)
+  }
 
   // Text selection → floating "New session" affordance. Position is relative
   // to the wrapper; cleared on outside click / empty selection.
@@ -506,7 +514,7 @@ export function TaskTree({
           doneRows.length > 0 ? (
             <ul className="tlt-its">
               {doneRows.map((it) => (
-                <ItemRow key={it.line0} item={it} pendingLine={pendingLine} onToggle={onToggle} onVerdict={onVerdict} />
+                <ItemRow key={it.line0} item={it} pendingLine={pendingLine} onToggle={onToggle} onVerdict={verdict} />
               ))}
             </ul>
           ) : null
@@ -530,7 +538,7 @@ export function TaskTree({
             {pendingRows.length > 0 ? (
               <ul className="tlt-its">
                 {pendingRows.map((it) => (
-                  <ItemRow key={it.line0} item={it} pendingLine={pendingLine} onToggle={onToggle} onVerdict={onVerdict} />
+                  <ItemRow key={it.line0} item={it} pendingLine={pendingLine} onToggle={onToggle} onVerdict={verdict} />
                 ))}
               </ul>
             ) : null}
@@ -550,6 +558,7 @@ export function TaskTree({
           </details>
         )
       })}
+      {dialog}
     </div>
   )
 }

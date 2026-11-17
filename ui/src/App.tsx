@@ -4,6 +4,7 @@ import { Clock, Plus, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { API_BASE, errText, relTime } from './api'
 import type { LedgerMeta } from './api'
+import { useDialog } from './Dialog'
 import { LedgerEditor } from './LedgerEditor'
 
 /**
@@ -15,6 +16,7 @@ import { LedgerEditor } from './LedgerEditor'
 export default function TodoLedgerApp() {
   const api = useAppApi()
   const notify = useNotify()
+  const { dialog, prompt, confirm } = useDialog()
 
   const [ledgers, setLedgers] = useState<LedgerMeta[] | null>(null)
   const [listError, setListError] = useState<string | null>(null)
@@ -46,7 +48,7 @@ export default function TodoLedgerApp() {
   })
 
   const createLedger = async () => {
-    const name = window.prompt('New ledger name')?.trim()
+    const name = (await prompt('New ledger name', { confirmLabel: 'Create', required: true }))?.trim()
     if (!name) return
     try {
       const meta = await api.post<LedgerMeta>(`${API_BASE}/ledgers`, { name })
@@ -57,7 +59,11 @@ export default function TodoLedgerApp() {
   }
 
   const deleteLedger = async (l: LedgerMeta) => {
-    if (!window.confirm(`Delete ledger "${l.name}"? This cannot be undone.`)) return
+    const ok = await confirm(`Delete ledger "${l.name}"? This cannot be undone.`, {
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+    if (!ok) return
     try {
       await api.del(`${API_BASE}/ledgers/${l.id}`)
       void refresh()
@@ -169,6 +175,7 @@ export default function TodoLedgerApp() {
           </div>
         )}
       </div>
+      {dialog}
     </>
   )
 }
