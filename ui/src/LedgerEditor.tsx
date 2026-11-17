@@ -433,17 +433,19 @@ export function LedgerEditor({ id, onBack }: { id: string; onBack: () => void })
 
       {/* Quick-add (both modes) */}
       <div className="border-t border-border px-6 py-3">
-        <form
-          className="flex max-w-3xl items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void quickAdd()
-          }}
-        >
+        {/* No <form>: the host's app iframe sandbox lacks allow-forms, which
+            blocks submit events, so Enter is handled on the input directly. */}
+        <div className="flex max-w-3xl items-center gap-2">
           <Plus size={14} className="shrink-0 text-muted" />
           <Input
             value={quickText}
             onChange={(e) => setQuickText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                e.preventDefault()
+                void quickAdd()
+              }
+            }}
             placeholder={
               quickDisabled
                 ? 'Save or cancel your edit to add items'
@@ -452,7 +454,7 @@ export function LedgerEditor({ id, onBack }: { id: string; onBack: () => void })
             disabled={quickDisabled || quickBusy || !detail}
             className="flex-1"
           />
-        </form>
+        </div>
       </div>
     </div>
   )
