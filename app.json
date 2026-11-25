@@ -39,6 +39,7 @@
   "permissions": {
     "api": ["/api/apps/todo-ledger"],
     "storage": true,
+    "cron": true,
     "events": ["update"]
   }
 }
